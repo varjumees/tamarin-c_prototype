@@ -82,7 +82,8 @@ tamarin_configuration config = {
     .uart_initialized = false,
     .pio = pio0,
     .sm = 0
-              .sm_tx = 1};
+    .sm_tx = 1
+};
 
 char *MAPPING_TO_STRING[] = {
     "None",
@@ -492,39 +493,37 @@ void cmd_jtag_mode_no_probe(tamarin_configuration *config)
     uprintf("🐞 SWD mode enabled. Ready for external debugger.\r\n");
 }
 
-void cmd_uart_mode(tamarin_configuration *config)
-{
-    if (config->probe_initialized)
-    {
+void cmd_uart_mode(tamarin_configuration *config) {
+    if(config->probe_initialized) {
         uprintf("SWD already initialized. Currently only one operation type is supported.\r\n");
         return;
     }
     uprintf("Configuring UART pins... \r\n");
 
-    // Initialize PIO for RX (existing code)
+    PIO pio = pio0;
+    uint sm = 0;
     uint offset = pio_add_program(config->pio, &uart_rx_program);
     uart_rx_program_init(config->pio, config->sm, offset, PIN_SBU1, 115200);
 
-    // Power up the level shifter (existing code)
     gpio_init(PIN_SHIFTER_SUPPLY);
     gpio_set_dir(PIN_SHIFTER_SUPPLY, 1);
     gpio_put(PIN_SHIFTER_SUPPLY, 1);
-
-    // Set SBU1 for input (RX) - existing code
+    
+    // Set SBU1 for input (RX)
     gpio_init(PIN_SBU1_DIR);
     gpio_set_dir(PIN_SBU1_DIR, 1);
     gpio_put(PIN_SBU1_DIR, SHIFTER_DIRECTION_IN);
-
-    // Set SBU2 for output (TX) - MODIFIED: was SHIFTER_DIRECTION_IN before
+    
+    // Set SBU2 for output (TX)
     gpio_init(PIN_SBU2_DIR);
     gpio_set_dir(PIN_SBU2_DIR, 1);
     gpio_put(PIN_SBU2_DIR, SHIFTER_DIRECTION_OUT);
-
+    
     // Initialize SBU2 pin for TX
     gpio_init(PIN_SBU2);
     gpio_set_dir(PIN_SBU2, GPIO_OUT);
-    gpio_put(PIN_SBU2, 1); // Idle high for UART
-
+    gpio_put(PIN_SBU2, 1);  // Idle high for UART
+    
     config->uart_initialized = true;
     vdm_send_uart(config);
     uprintf("📜 UART mode enabled. Connect to second serial port for access.\r\n");
@@ -746,91 +745,6 @@ void handle_menu()
     }
 }
 
-bool check_device_disconnected(tamarin_usb_pd *usb_pd)
-{
-    static uint32_t last_check_time = 0;
-    static uint32_t disconnect_start_time = 0;
-    const uint32_t CHECK_INTERVAL_MS = 1000;      // Check every second
-    const uint32_t DISCONNECT_TIMEOUT_MS = 10000; // 10 seconds with no activity
-    const uint32_t RESET_COOLDOWN_MS = 5000;      // 5 seconds between resets
-
-    uint32_t current_time = to_ms_since_boot(get_absolute_time());
-
-    // Only check periodically
-    if (current_time - last_check_time < CHECK_INTERVAL_MS)
-    {
-        return false;
-    }
-
-    last_check_time = current_time;
-
-    // If we're not in the IDLE state yet, we're still initializing
-    if (usb_pd->state != USB_STATE_IDLE)
-    {
-        disconnect_start_time = 0;
-        return false;
-    }
-
-    // Check if we've had any PD activity recently
-    bool no_recent_activity = (current_time - usb_pd->last_connection_time > DISCONNECT_TIMEOUT_MS);
-
-    // Check if enough time has passed since last reset
-    bool reset_cooldown_expired = (current_time - usb_pd->last_reset_time > RESET_COOLDOWN_MS);
-
-    // IMPORTANT: Additionally check physical CC pins to confirm disconnection
-    int16_t cc1 = fusb302_measure_cc_pin_source(0, 0);
-    int16_t cc2 = fusb302_measure_cc_pin_source(0, 1);
-    bool physically_connected = (cc1 > 0 || cc2 > 0);
-
-    // If we're physically connected, update the connection time
-    // This prevents false disconnection detection when a device doesn't send regular PD messages
-    if (physically_connected)
-    {
-        // Only output debug if we were previously in a possible disconnect state
-        if (disconnect_start_time != 0)
-        {
-            uprintf("Physical connection still present (CC1=%d, CC2=%d), canceling disconnect timer\r\n",
-                    cc1, cc2);
-            disconnect_start_time = 0;
-        }
-
-        // Consider this as activity
-        usb_pd->last_connection_time = current_time;
-        return false;
-    }
-
-    // Only consider a disconnection if both no PD activity AND no physical connection
-    if (usb_pd->is_connected && no_recent_activity && !physically_connected)
-    {
-        // Start tracking disconnect time
-        if (disconnect_start_time == 0)
-        {
-            disconnect_start_time = current_time;
-            uprintf("Physical disconnection detected (CC1=%d, CC2=%d) - starting timer\r\n",
-                    cc1, cc2);
-        }
-        // If we've been disconnected long enough and cooldown expired
-        else if ((current_time - disconnect_start_time > CHECK_INTERVAL_MS * 2) &&
-                 reset_cooldown_expired)
-        {
-            uprintf("🔌 Device disconnected! Restarting Tamarin-C...\r\n");
-            usb_pd->last_reset_time = current_time;
-            usb_pd->is_connected = false;
-            return true;
-        }
-    }
-    else
-    {
-        // Reset disconnect timer
-        if (disconnect_start_time != 0)
-        {
-            disconnect_start_time = 0;
-        }
-    }
-
-    return false;
-}
-
 int main()
 {
     board_init();
@@ -877,32 +791,9 @@ int main()
 
     // Callback when PD is successfully initialized
     usb_pd.initialized_callback = usb_initialized_callback;
-    // Add these variables before the while loop
-    static uint32_t last_cc_check_time = 0;
-    static uint32_t cc_disconnect_time = 0;
-    static uint32_t last_reset_time = 0;
-    const uint32_t CC_CHECK_INTERVAL_MS = 250;      // Increased check interval to 250ms
-    const uint32_t CC_DISCONNECT_TIMEOUT_MS = 1000; // Increased to 1 second
-    const uint32_t MIN_RESET_INTERVAL_MS = 5000;    // Minimum 5 seconds between resets
-
     while (1)
     {
         tud_task();
-
-        // Check for device disconnection
-        if (check_device_disconnected(&usb_pd))
-        {
-            // Turn off VBUS
-            vbus_off(&usb_pd);
-            // Reset FUSB302
-            fusb302_pd_reset(0);
-            // Small delay
-            sleep_ms(100);
-            // Restart device
-            tamarin_reset();
-            // No return needed here as tamarin_reset() doesn't return
-        }
-
         // Existing code
         usb_pd_handle_interrupt(&usb_pd);
         handle_menu();
@@ -911,29 +802,25 @@ int main()
             tamarin_probe_task();
         }
         // In the main while(1) loop, after the existing UART RX handling code:
-        if (config.uart_initialized)
-        {
-            // Existing code for RX from device to USB:
-            if (uart_rx_program_readable(config.pio, config.sm))
-            {
+        if(config.uart_initialized) {
+            // RX: Device → USB (existing code)
+            if(uart_rx_program_readable(config.pio, config.sm)) {
                 char c = uart_rx_program_getc(config.pio, config.sm);
                 tud_cdc_n_write_char(ITF_DCSD, c);
                 tud_cdc_n_write_flush(ITF_DCSD);
             }
-
-            // NEW CODE: Handle data from USB to device
-            if (tud_cdc_n_available(ITF_DCSD))
-            {
-                uint8_t buf[64];
+            
+            // TX: USB → Device (new code)
+            if(tud_cdc_n_available(ITF_DCSD)) {
+                uint8_t buf[16]; // Smaller buffer to avoid long delays
                 uint32_t count = tud_cdc_n_read(ITF_DCSD, buf, sizeof(buf));
-
+                
                 // Send each byte to the UART TX
-                for (uint32_t i = 0; i < count; i++)
-                {
-                    // Use bit-banging to send the data
+                for(uint32_t i = 0; i < count; i++) {
                     uart_tx_bit_bang(PIN_SBU2, buf[i], 115200);
                 }
             }
         }
     }
+    return 0; // This is never reached, but keeps the compiler happy
 }

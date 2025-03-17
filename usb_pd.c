@@ -362,13 +362,13 @@ void usb_pd_handle_interrupt(tamarin_usb_pd *usb_pd)
     }
 
     // Get current time for tracking
-    uint32_t current_time = to_ms_since_boot(get_absolute_time());
+    // uint32_t current_time = to_ms_since_boot(get_absolute_time());
 
-    if (irq != 0 || irqa != 0 || irqb != 0)
-    {
-        usb_pd->last_connection_time = current_time;
-    }
-    
+    // if (irq != 0 || irqa != 0 || irqb != 0)
+    // {
+    //    usb_pd->last_connection_time = current_time;
+    // }
+
     // Existing switch statement, but add connection state updates:
     switch (usb_pd->state)
     {
@@ -390,7 +390,7 @@ void usb_pd_handle_interrupt(tamarin_usb_pd *usb_pd)
             fusb302_tcpm_set_msg_header(0, 1, 1); // Source
             send_source_cap(usb_pd);
             usb_pd->state = USB_STATE_WAIT_REQUEST;
-            
+
             // Update connection tracking - we detected a plug event
             usb_pd->is_connected = true;
             usb_pd->last_connection_time = current_time;
@@ -413,10 +413,10 @@ void usb_pd_handle_interrupt(tamarin_usb_pd *usb_pd)
             handle_msg(usb_pd, sop, hdr, msg);
             usb_pd->initialized_callback(usb_pd);
             usb_pd->state = USB_STATE_IDLE;
-            
+
             // Update connection tracking - communication is established
-            usb_pd->is_connected = true;
-            usb_pd->last_connection_time = current_time;
+            // usb_pd->is_connected = true;
+            // usb_pd->last_connection_time = current_time;
         }
         break;
 
@@ -436,7 +436,7 @@ void usb_pd_handle_interrupt(tamarin_usb_pd *usb_pd)
                     break;
                 }
                 handle_msg(usb_pd, sop, hdr, msg);
-                
+
                 // Update connection tracking - still getting messages
                 usb_pd->is_connected = true;
                 usb_pd->last_connection_time = current_time;
@@ -476,9 +476,9 @@ bool usb_pd_init(tamarin_usb_pd *usb_pd, uint32_t pin_scl, uint32_t pin_sda, uin
     usb_pd->initialized_callback = NULL;
 
     // Initialize connection state tracking
-    usb_pd->is_connected = false;
-    usb_pd->last_connection_time = 0;
-    usb_pd->last_reset_time = to_ms_since_boot(get_absolute_time()); // Start cooldown now
+    // usb_pd->is_connected = false;
+    // usb_pd->last_connection_time = 0;
+    // usb_pd->last_reset_time = to_ms_since_boot(get_absolute_time()); // Start cooldown now
 
     // Initialize FUSB interrupt pin
     gpio_init(usb_pd->pin_int);
@@ -503,7 +503,7 @@ bool usb_pd_init(tamarin_usb_pd *usb_pd, uint32_t pin_scl, uint32_t pin_sda, uin
     }
 
     uprintf("Device ID: %c_rev%c (0x%x)\r\n",
-           'A' + ((reg >> 4) & 0x7), 'A' + (reg & 3), reg);
+            'A' + ((reg >> 4) & 0x7), 'A' + (reg & 3), reg);
 
     fusb302_tcpm_init(0);
     fusb302_pd_reset(0);

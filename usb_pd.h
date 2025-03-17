@@ -53,11 +53,11 @@ typedef struct tamarin_usb_pd {
        this will eventually be fixed. */
     bool handle_messages_in_idle;
     
-    // ADD THESE NEW FIELDS:
     // Connection state tracking
-    bool is_connected;
-    uint32_t last_connection_time;
-    uint32_t last_reset_time;
+    
+    // bool is_connected;
+    // uint32_t last_connection_time;
+    // uint32_t last_reset_time;
 } tamarin_usb_pd;
 
 

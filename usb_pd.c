@@ -1,4 +1,4 @@
-/*
+/*  
     Tamarin-C - Tool for exploring USB-C on iPhones & macs
     Copyright 2023 Thomas 'stacksmashing' Roth - code@stacksmashing.net
 
@@ -16,7 +16,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 
-int16_t POWER = TYPEC_RP_USB; // 500mA 3A asemel
+int16_t POWER = TYPEC_RP_USB;  // 500mA 3A asemel
 
 static tamarin_usb_pd *interrupt_usb_instance;
 
@@ -52,14 +52,14 @@ void usb_pd_parse_interrupt(int16_t irq, int16_t irqa, int16_t irqb)
     bool collision = irq & TCPC_REG_INTERRUPT_COLLISION;
     bool bc_lvl = irq & TCPC_REG_INTERRUPT_BC_LVL;
     uprintf("\tIRQ %s %s %s %s %s %s %s %s\r\n",
-            vbusok ? "VBUSOK" : "",
-            activity ? "ACTIVITY" : "",
-            comp_chng ? "COMP_CHNG" : "",
-            crc_chk ? "CRC_CHK" : "",
-            alert ? "ALERT" : "",
-            wake ? "WAKE" : "",
-            collision ? "COLLISION" : "",
-            bc_lvl ? "BC_LVL" : "");
+           vbusok ? "VBUSOK" : "",
+           activity ? "ACTIVITY" : "",
+           comp_chng ? "COMP_CHNG" : "",
+           crc_chk ? "CRC_CHK" : "",
+           alert ? "ALERT" : "",
+           wake ? "WAKE" : "",
+           collision ? "COLLISION" : "",
+           bc_lvl ? "BC_LVL" : "");
 
     bool ocp_temp = irqa & TCPC_REG_INTERRUPTA_OCP_TEMP;
     bool togdone = irqa & TCPC_REG_INTERRUPTA_TOGDONE;
@@ -71,14 +71,14 @@ void usb_pd_parse_interrupt(int16_t irq, int16_t irqa, int16_t irqb)
     bool hardreset = irqa & TCPC_REG_INTERRUPTA_HARDRESET;
 
     uprintf("\tIRQA %s %s %s %s %s %s %s %s\r\n",
-            ocp_temp ? "OCP_TEMP" : "",
-            togdone ? "TOGDONE" : "",
-            softfail ? "SOFTFAIL" : "",
-            retryfail ? "RETRYFAIL" : "",
-            hardsent ? "HARDSENT" : "",
-            tx_success ? "TX_SUCCESS" : "",
-            softreset ? "SOFTRESET" : "",
-            hardreset ? "HARDRESET" : "");
+           ocp_temp ? "OCP_TEMP" : "",
+           togdone ? "TOGDONE" : "",
+           softfail ? "SOFTFAIL" : "",
+           retryfail ? "RETRYFAIL" : "",
+           hardsent ? "HARDSENT" : "",
+           tx_success ? "TX_SUCCESS" : "",
+           softreset ? "SOFTRESET" : "",
+           hardreset ? "HARDRESET" : "");
 
     bool gcrcsent = irqb & TCPC_REG_INTERRUPTB_GCRCSENT;
     uprintf("\tIRQB %s\r\n", gcrcsent ? "GCRCSENT" : "");
@@ -341,7 +341,7 @@ static void usb_pd_interrupt_callback(uint gpio, uint32_t events)
     usb_pd->interrupt_pending = true;
     usb_pd_disable_interrupt(usb_pd);
 }
-
+ 
 void usb_pd_handle_interrupt(tamarin_usb_pd *usb_pd)
 {
     if (!usb_pd->interrupt_pending)
@@ -361,15 +361,66 @@ void usb_pd_handle_interrupt(tamarin_usb_pd *usb_pd)
         return;
     }
 
-    // Get current time for tracking
-    // uint32_t current_time = to_ms_since_boot(get_absolute_time());
+    // Detect unplugging by checking VBUS or CC levels
+    static bool last_connected = true;           // Tracks the last connection state
+    static uint32_t last_stable_time = 0;        // Tracks the last time the state was stable
+    const uint32_t debounce_time_ms = 100;       // Debounce time in milliseconds
 
-    // if (irq != 0 || irqa != 0 || irqb != 0)
-    // {
-    //    usb_pd->last_connection_time = current_time;
-    // }
+    int16_t cc1 = fusb302_measure_cc_pin_source(0, 0); // Measure CC1
+    int16_t cc2 = fusb302_measure_cc_pin_source(0, 1); // Measure CC2
+    int16_t vbus_level = fusb302_tcpm_get_vbus_level(0); // Measure VBUS
 
-    // Existing switch statement, but add connection state updates:
+    // Debugging output for CC and VBUS levels
+    uprintf("CC1: %d, CC2: %d, VBUS: %d\r\n", cc1, cc2, vbus_level);
+
+    // Determine current connection state
+    bool currently_connected = !(cc1 == TYPEC_CC_VOLT_OPEN && cc2 == TYPEC_CC_VOLT_OPEN) && vbus_level;
+
+    uint32_t current_time = to_ms_since_boot(get_absolute_time());
+
+    // Handle unplugging
+    if (!currently_connected && last_connected)
+    {
+        // Wait for debounce time to confirm unplugging
+        if (current_time - last_stable_time > debounce_time_ms)
+        {
+            last_stable_time = current_time;
+
+            if (!vbus_level)
+            {
+                // Cable is fully unplugged (VBUS is 0)
+                uprintf("🔌 Unplugging detected! Restarting Tamarin-C...\r\n");
+                tamarin_reset(); // Restart the device
+                return;
+            }
+            else
+            {
+                // Ignore transient states with VBUS still high
+                uprintf("🔌 Unplugging ignored: VBUS still high.\r\n");
+            }
+        }
+    }
+    // Handle plug-in
+    else if (currently_connected && !last_connected)
+    {
+        // Wait for debounce time to confirm plug-in
+        if (current_time - last_stable_time > debounce_time_ms)
+        {
+            last_stable_time = current_time;
+
+            uprintf("🔌 Plugging detected! Device is now connected.\r\n");
+        }
+    }
+
+    // Reset the debounce timer if the state hasn't changed
+    if (currently_connected == last_connected)
+    {
+        last_stable_time = current_time;
+    }
+
+    last_connected = currently_connected;
+
+    // Existing interrupt handling logic
     switch (usb_pd->state)
     {
     case USB_STATE_WAITING_FOR_COMP_CHNG:
@@ -377,8 +428,8 @@ void usb_pd_handle_interrupt(tamarin_usb_pd *usb_pd)
         {
             uprintf("🔌 Plug-event detected!\r\n");
             fusb302_disable_toggle();
-            int16_t cc1 = fusb302_measure_cc_pin_source(0, 0);
-            int16_t cc2 = fusb302_measure_cc_pin_source(0, 1);
+            cc1 = fusb302_measure_cc_pin_source(0, 0);
+            cc2 = fusb302_measure_cc_pin_source(0, 1);
             uprintf("CCs: %d %d\r\n", cc1, cc2);
 
             fusb302_tcpm_set_cc(0, TYPEC_CC_RP);
@@ -390,10 +441,6 @@ void usb_pd_handle_interrupt(tamarin_usb_pd *usb_pd)
             fusb302_tcpm_set_msg_header(0, 1, 1); // Source
             send_source_cap(usb_pd);
             usb_pd->state = USB_STATE_WAIT_REQUEST;
-
-            // Update connection tracking - we detected a plug event
-            usb_pd->is_connected = true;
-            usb_pd->last_connection_time = current_time;
         }
         break;
 
@@ -413,10 +460,6 @@ void usb_pd_handle_interrupt(tamarin_usb_pd *usb_pd)
             handle_msg(usb_pd, sop, hdr, msg);
             usb_pd->initialized_callback(usb_pd);
             usb_pd->state = USB_STATE_IDLE;
-
-            // Update connection tracking - communication is established
-            // usb_pd->is_connected = true;
-            // usb_pd->last_connection_time = current_time;
         }
         break;
 
@@ -436,10 +479,6 @@ void usb_pd_handle_interrupt(tamarin_usb_pd *usb_pd)
                     break;
                 }
                 handle_msg(usb_pd, sop, hdr, msg);
-
-                // Update connection tracking - still getting messages
-                usb_pd->is_connected = true;
-                usb_pd->last_connection_time = current_time;
             }
         }
         break;
@@ -475,11 +514,6 @@ bool usb_pd_init(tamarin_usb_pd *usb_pd, uint32_t pin_scl, uint32_t pin_sda, uin
     usb_pd->state = USB_STATE_NONE;
     usb_pd->initialized_callback = NULL;
 
-    // Initialize connection state tracking
-    // usb_pd->is_connected = false;
-    // usb_pd->last_connection_time = 0;
-    // usb_pd->last_reset_time = to_ms_since_boot(get_absolute_time()); // Start cooldown now
-
     // Initialize FUSB interrupt pin
     gpio_init(usb_pd->pin_int);
     gpio_pull_up(usb_pd->pin_int);
@@ -503,7 +537,7 @@ bool usb_pd_init(tamarin_usb_pd *usb_pd, uint32_t pin_scl, uint32_t pin_sda, uin
     }
 
     uprintf("Device ID: %c_rev%c (0x%x)\r\n",
-            'A' + ((reg >> 4) & 0x7), 'A' + (reg & 3), reg);
+           'A' + ((reg >> 4) & 0x7), 'A' + (reg & 3), reg);
 
     fusb302_tcpm_init(0);
     fusb302_pd_reset(0);

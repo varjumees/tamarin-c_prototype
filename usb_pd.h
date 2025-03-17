@@ -46,18 +46,13 @@ typedef struct tamarin_usb_pd {
     bool log_interrupts;
     bool log_messages;
 
+
     /* The iPhone 14 when connected by USB-C -> Lightning cable
        reguarly sends power requests. This needs to be true to
        allow iPhone 14 to keep charging, but might cause other issues.
        We're probably doing something wrong with the PD setup, so hopefully
        this will eventually be fixed. */
     bool handle_messages_in_idle;
-    
-    // ADD THESE NEW FIELDS:
-    // Connection state tracking
-    bool is_connected;
-    uint32_t last_connection_time;
-    uint32_t last_reset_time;
 } tamarin_usb_pd;
 
 

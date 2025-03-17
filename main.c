@@ -1,4 +1,4 @@
-/*  
+/*
     Tamarin-C - Tool for exploring USB-C on iPhones & macs
     Copyright 2023 Thomas 'stacksmashing' Roth - code@stacksmashing.net
 
@@ -29,7 +29,6 @@
 
 #include <stdlib.h>
 
-
 #define LED_PIN 25
 
 enum CC_POLARITY polarity = CC_POLARITY_CC1;
@@ -48,11 +47,11 @@ tamarin_usb_pd usb_pd = {
     .log_interrupts = false,
     .log_messages = false,
     // Needs to be true for USB-C -> Lightning
-    .handle_messages_in_idle = false
-};
+    .handle_messages_in_idle = false};
 
 // Mixes config and state a bit
-typedef struct tamarin_configuration {
+typedef struct tamarin_configuration
+{
     // Config
     enum PIN_MAPPING uart_pins;
     enum PIN_MAPPING bus1_pins;
@@ -68,6 +67,7 @@ typedef struct tamarin_configuration {
 
     PIO pio;
     uint sm;
+    uint sm_tx;
 } tamarin_configuration;
 
 tamarin_configuration config = {
@@ -82,24 +82,24 @@ tamarin_configuration config = {
     .uart_initialized = false,
     .pio = pio0,
     .sm = 0
-};
+              .sm_tx = 1};
 
 char *MAPPING_TO_STRING[] = {
     "None",
     "D+/D- 1",
     "D+/D- 2",
     "INVALID",
-    "SBU"
-};
+    "SBU"};
 
-struct known_actions {
+struct known_actions
+{
     int id;
     char *name;
 };
 
 struct known_actions known_actions[] = {
-    {.id = 0x206, .name="SWD"},
-    {.id = 0x306, .name="UART"},
+    {.id = 0x206, .name = "SWD"},
+    {.id = 0x306, .name = "UART"},
     {.id = 0x103, .name = "PD Reset"},
     {.id = 0x105, .name = "Reboot"},
     {.id = 0x106, .name = "DFU / Hold"},
@@ -112,9 +112,12 @@ struct known_actions known_actions[] = {
 void cmd_jtag_mode(tamarin_configuration *config);
 void cmd_uart_mode(tamarin_configuration *config);
 
-char *get_action_description(int action_id) {
-    for(int i=0; i < sizeof(known_actions)/sizeof(struct known_actions); i++) {
-        if(known_actions[i].id == action_id) {
+char *get_action_description(int action_id)
+{
+    for (int i = 0; i < sizeof(known_actions) / sizeof(struct known_actions); i++)
+    {
+        if (known_actions[i].id == action_id)
+        {
             return known_actions[i].name;
         }
     }
@@ -124,7 +127,8 @@ char *get_action_description(int action_id) {
 
 static void vdm_send_msg(tamarin_usb_pd *T_usb_pd, uint32_t *vdm, int nr_u32)
 {
-    if(T_usb_pd->log_messages) {
+    if (T_usb_pd->log_messages)
+    {
         uprintf("Sending (%d): ", nr_u32);
         for (int i = 0; i < nr_u32; i++)
         {
@@ -151,7 +155,8 @@ void vdm_apple_perform_action(tamarin_usb_pd *T_usb_pd, bool exit, bool persist,
     // 2 = command + action
     uint32_t message_length = 2 + arguments_len;
 
-    if(arguments_len > 14) {
+    if (arguments_len > 14)
+    {
         printf("Error: Maximum argument length is 14\r\n");
         return;
     }
@@ -163,6 +168,27 @@ void vdm_apple_perform_action(tamarin_usb_pd *T_usb_pd, bool exit, bool persist,
         vdm[2 + i] = arguments[i];
     }
     vdm_send_msg(T_usb_pd, vdm, message_length);
+}
+
+// Simple bit-bang UART TX implementation
+void uart_tx_bit_bang(uint pin, uint8_t data, uint baud_rate)
+{
+    uint32_t bit_time = 1000000 / baud_rate; // Time for one bit in microseconds
+
+    // Start bit (low)
+    gpio_put(pin, 0);
+    busy_wait_us(bit_time);
+
+    // Data bits (LSB first)
+    for (int i = 0; i < 8; i++)
+    {
+        gpio_put(pin, (data >> i) & 1);
+        busy_wait_us(bit_time);
+    }
+
+    // Stop bit (high)
+    gpio_put(pin, 1);
+    busy_wait_us(bit_time);
 }
 
 /* This function does not handle hard-resets etc., it's very naive. */
@@ -177,21 +203,23 @@ void vdm_send_msg_blocking(
     usb_pd_disable_interrupt(usb_pd);
     vdm_send_msg(usb_pd, vdm, message_length);
     // vdm_apple_perform_action(exit, persist, exit_conflicting, mapping, action_id, arguments, arguments_len);
-    if(usb_pd->log_messages) {
+    if (usb_pd->log_messages)
+    {
         uprintf("Waiting for response...\r\n");
     }
-    
+
     uint32_t end_time = to_ms_since_boot(get_absolute_time()) + timeout;
     while (1)
     {
         // Wait for interrupt
         while (gpio_get(PIN_FUSB_INT))
         {
-            if((timeout != 0) && (to_ms_since_boot(get_absolute_time()) > end_time)) {
-                 uprintf("Error: vdm_send_msg_blocking timed out!\r\n");
-                 *out_len = 0 ;
-                 usb_pd_enable_interrupt(usb_pd);
-                 return;
+            if ((timeout != 0) && (to_ms_since_boot(get_absolute_time()) > end_time))
+            {
+                uprintf("Error: vdm_send_msg_blocking timed out!\r\n");
+                *out_len = 0;
+                usb_pd_enable_interrupt(usb_pd);
+                return;
             }
         }
 
@@ -216,14 +244,15 @@ void vdm_send_msg_blocking(
                 continue;
             }
 
-            if(usb_pd->log_messages) {
+            if (usb_pd->log_messages)
+            {
                 uprintf("<VENDOR");
-                for(int i=0; i < len; i++) {
+                for (int i = 0; i < len; i++)
+                {
                     uprintf(" %08X", out[i]);
                 }
                 uprintf("\r\n");
             }
-            
 
             if (type == PD_DATA_VENDOR_DEF)
             {
@@ -262,7 +291,7 @@ void vdm_get_action_info(tamarin_usb_pd *usb_pd, uint16_t action)
             uprintf("0x%04X ", i2);
         }
     }
-    
+
     uprintf("\r\n");
 }
 
@@ -270,11 +299,10 @@ void vdm_get_action_info(tamarin_usb_pd *usb_pd, uint16_t action)
 
 void vdm_pd_reset(tamarin_configuration *config)
 {
-	uint32_t vdm[] = { 0x5ac8012, 0x0103, 0x8000<<16 };
-	vdm_send_msg(config->usb_pd, vdm, ARRAY_SIZE(vdm));
-	uprintf(">VDM SET ACTION PD reset\r\n");
+    uint32_t vdm[] = {0x5ac8012, 0x0103, 0x8000 << 16};
+    vdm_send_msg(config->usb_pd, vdm, ARRAY_SIZE(vdm));
+    uprintf(">VDM SET ACTION PD reset\r\n");
 }
-
 
 void vdm_send_reboot(tamarin_configuration *config)
 {
@@ -286,7 +314,7 @@ void vdm_send_reboot(tamarin_configuration *config)
 void vdm_dfu_hold(tamarin_configuration *config)
 {
     uint32_t arg = 0x8001UL << 16;
-    uint32_t vdm[] = { 0x5ac8012, 0x0106, 0x80010000};
+    uint32_t vdm[] = {0x5ac8012, 0x0106, 0x80010000};
     vdm_send_msg(config->usb_pd, vdm, ARRAY_SIZE(vdm));
     uprintf(">VDM DFU (0x0106)\r\n");
 }
@@ -294,7 +322,7 @@ void vdm_dfu_hold(tamarin_configuration *config)
 void vdm_dfu_usb(tamarin_configuration *config)
 {
     uint32_t arg = 0x8001UL << 16;
-    vdm_apple_perform_action(config->usb_pd, 0,0, 0, PIN_MAPPING_DPDN2, 0x606, &arg, 1);
+    vdm_apple_perform_action(config->usb_pd, 0, 0, 0, PIN_MAPPING_DPDN2, 0x606, &arg, 1);
     uprintf(">VDM DFU USB (0x606)\r\n");
 }
 
@@ -321,7 +349,6 @@ void vdm_enter_bus1(tamarin_configuration *config)
 {
     vdm_apple_perform_action(config->usb_pd, 0, 1, 1, config->bus1_pins, 0x0809, NULL, 0);
     uprintf(">VDM BUS1 on %s\r\n", MAPPING_TO_STRING[config->bus1_pins]);
-    
 }
 
 void vdm_enter_bus2(tamarin_configuration *config)
@@ -349,7 +376,6 @@ void vdm_send_weird_uart2(tamarin_configuration *config)
 {
     vdm_apple_perform_action(config->usb_pd, 0, 1, 1, PIN_MAPPING_DPDN1, 0x0301, NULL, 0);
     uprintf(">VDM WEIRD UART2\r\n");
-    
 }
 
 // Unknown on iPhone 15 Pro
@@ -370,10 +396,11 @@ void vdm_send_0x0607(tamarin_configuration *config)
 void usb_initialized_callback(tamarin_usb_pd *usb_pd)
 {
     uprintf("✅Communication initialized\r\n");
-    if(config.uart_on_initialize) {
+    if (config.uart_on_initialize)
+    {
         cmd_uart_mode(&config);
     }
-    else if(config.probe_on_initialize)
+    else if (config.probe_on_initialize)
     {
         cmd_jtag_mode(&config);
     }
@@ -409,14 +436,16 @@ void vdm_get_action_list(tamarin_usb_pd *usb_pd)
     }
 }
 
-enum MENU_STATES {
+enum MENU_STATES
+{
     MENU_STATE_MAIN,
     MENU_STATE_MAPPING_SELECT_BUS,
     MENU_STATE_MAPPING_SELECT_MAPPING,
     MENU_STATE_DEFAULT_MODE
 };
 
-typedef struct menu {
+typedef struct menu
+{
     enum MENU_STATES state;
 
     // Used during mapping select to keep the selected bus selection.
@@ -424,11 +453,12 @@ typedef struct menu {
 };
 
 struct menu menu = {
-    .state = MENU_STATE_MAIN
-};
+    .state = MENU_STATE_MAIN};
 
-void cmd_jtag_mode(tamarin_configuration *config) {
-    if(config->uart_initialized) {
+void cmd_jtag_mode(tamarin_configuration *config)
+{
+    if (config->uart_initialized)
+    {
         uprintf("UART already initialized. Currently only one operation type is supported.\r\n");
         return;
     }
@@ -445,88 +475,112 @@ void cmd_jtag_mode(tamarin_configuration *config) {
     gpio_set_dir(PIN_SBU1_DIR, 1);
     gpio_put(PIN_SBU1_DIR, SHIFTER_DIRECTION_OUT);
 
-    if(config->probe_initialized) {
+    if (config->probe_initialized)
+    {
         tamarin_probe_deinit();
     }
     tamarin_probe_init();
     config->probe_initialized = true;
-    
+
     uprintf("🐞 SWD mode enabled. Use openocd -f interface/tamarin.cfg to connect.\r\n");
 }
 
-void cmd_jtag_mode_no_probe(tamarin_configuration *config) {
+void cmd_jtag_mode_no_probe(tamarin_configuration *config)
+{
     uprintf("Configuring JTAG pins... \r\n");
     vdm_send_swd(config);
     uprintf("🐞 SWD mode enabled. Ready for external debugger.\r\n");
 }
 
-void cmd_uart_mode(tamarin_configuration *config) {
-    if(config->probe_initialized) {
+void cmd_uart_mode(tamarin_configuration *config)
+{
+    if (config->probe_initialized)
+    {
         uprintf("SWD already initialized. Currently only one operation type is supported.\r\n");
         return;
     }
     uprintf("Configuring UART pins... \r\n");
 
-    PIO pio = pio0;
-    uint sm = 0;
+    // Initialize PIO for RX (existing code)
     uint offset = pio_add_program(config->pio, &uart_rx_program);
     uart_rx_program_init(config->pio, config->sm, offset, PIN_SBU1, 115200);
 
+    // Power up the level shifter (existing code)
     gpio_init(PIN_SHIFTER_SUPPLY);
     gpio_set_dir(PIN_SHIFTER_SUPPLY, 1);
     gpio_put(PIN_SHIFTER_SUPPLY, 1);
-    gpio_init(PIN_SBU2_DIR);
-    gpio_set_dir(PIN_SBU2_DIR, 1);
-    gpio_put(PIN_SBU2_DIR, SHIFTER_DIRECTION_IN);
+
+    // Set SBU1 for input (RX) - existing code
     gpio_init(PIN_SBU1_DIR);
     gpio_set_dir(PIN_SBU1_DIR, 1);
     gpio_put(PIN_SBU1_DIR, SHIFTER_DIRECTION_IN);
+
+    // Set SBU2 for output (TX) - MODIFIED: was SHIFTER_DIRECTION_IN before
+    gpio_init(PIN_SBU2_DIR);
+    gpio_set_dir(PIN_SBU2_DIR, 1);
+    gpio_put(PIN_SBU2_DIR, SHIFTER_DIRECTION_OUT);
+
+    // Initialize SBU2 pin for TX
+    gpio_init(PIN_SBU2);
+    gpio_set_dir(PIN_SBU2, GPIO_OUT);
+    gpio_put(PIN_SBU2, 1); // Idle high for UART
+
     config->uart_initialized = true;
     vdm_send_uart(config);
     uprintf("📜 UART mode enabled. Connect to second serial port for access.\r\n");
 }
 
-void cmd_uart_mode_no_probe(tamarin_configuration *config) {
+void cmd_uart_mode_no_probe(tamarin_configuration *config)
+{
     uprintf("Configuring UART pins... \r\n");
     vdm_send_uart(config);
     uprintf("📜 UART mode enabled. Ready for external probe.\r\n");
 }
 
-void cmd_reboot_device(tamarin_configuration *config) {
+void cmd_reboot_device(tamarin_configuration *config)
+{
     vdm_send_reboot(config);
 }
 
-void cmd_map_bus1(tamarin_configuration *config) {
+void cmd_map_bus1(tamarin_configuration *config)
+{
     vdm_enter_bus1(config);
 }
 
-void cmd_map_bus2(tamarin_configuration *config) {
+void cmd_map_bus2(tamarin_configuration *config)
+{
     vdm_enter_bus2(config);
 }
 
-void cmd_map_weird_uart(tamarin_configuration *config) {
+void cmd_map_weird_uart(tamarin_configuration *config)
+{
     vdm_send_weird_uart(config);
 }
 
-void cmd_map_weird_uart2(tamarin_configuration *config) {
+void cmd_map_weird_uart2(tamarin_configuration *config)
+{
     vdm_send_weird_uart2(config);
 }
 
-void cmd_map_410(tamarin_configuration *config) {
+void cmd_map_410(tamarin_configuration *config)
+{
     vdm_apple_perform_action(config->usb_pd, 0, 1, 1, PIN_MAPPING_DPDN1, 0x0410, NULL, 0);
     uprintf(">VDM 0x410\r\n");
 }
 
-void cmd_dfu(tamarin_configuration *config) {
+void cmd_dfu(tamarin_configuration *config)
+{
     vdm_dfu_hold(config);
 }
 
-void cmd_fetch_actions(tamarin_configuration *config) {
+void cmd_fetch_actions(tamarin_configuration *config)
+{
     vdm_get_action_list(config->usb_pd);
     uprintf("\r\n> ");
 }
 
-void cmd_set_pin_mapping(tamarin_configuration *config) {
+void cmd_set_pin_mapping(tamarin_configuration *config)
+{
     uprintf("Select mapping to update:\r\n");
     uprintf("- 1 - UART  mapping (Currently: %s)\r\n", MAPPING_TO_STRING[config->uart_pins]);
     uprintf("- 2 - Bus 1 mapping (Currently: %s)\r\n", MAPPING_TO_STRING[config->bus1_pins]);
@@ -536,20 +590,39 @@ void cmd_set_pin_mapping(tamarin_configuration *config) {
     menu.state = MENU_STATE_MAPPING_SELECT_BUS;
 }
 
-void tamarin_reset() {
-    watchdog_enable(100, 1); // Enable the watchdog timer to trigger a reset
+void tamarin_reset()
+{
+    // Print message before reset
+    uprintf("Resetting Tamarin-C...\r\n");
+
+    // Ensure VBUS is off
+    gpio_put(PIN_VBUS_EN, 0);
+
+    // Small delay to allow messages to be sent
+    sleep_ms(100);
+
+    // Enable watchdog with very short timeout to trigger reset
+    watchdog_enable(1, 1);
+
+    // Wait for watchdog to trigger
+    while (1)
+    {
+        // This loop will end when the watchdog resets the device
+    }
 }
 
-void cmd_reset_tamarin(tamarin_configuration *config) {
+void cmd_reset_tamarin(tamarin_configuration *config)
+{
     tamarin_reset();
 }
 
-void cmd_firmware_update(tamarin_configuration *config) {
+void cmd_firmware_update(tamarin_configuration *config)
+{
     reset_usb_boot(0, 0);
 }
 
-
-typedef struct tamarin_command {
+typedef struct tamarin_command
+{
     char key;
     char *description;
     void (*implementation)(tamarin_configuration *config);
@@ -572,17 +645,19 @@ tamarin_command commands[] = {
     {.key = 'U', .description = "Tamarin firmware update mode", .implementation = cmd_firmware_update},
 };
 
-
-void print_menu() {
+void print_menu()
+{
     uprintf("\r\nTamarin-C\r\n\r\nHello 37c3!\r\n\r\n");
-    for(int i = 0; i < sizeof(commands)/sizeof(tamarin_command); i++) {
+    for (int i = 0; i < sizeof(commands) / sizeof(tamarin_command); i++)
+    {
         uprintf("%c: %s\r\n", commands[i].key, commands[i].description);
     }
     uprintf("\r\n> ");
     return;
 }
 
-void print_available_mappings() {
+void print_available_mappings()
+{
     uprintf("Select which pins to map to:\r\n");
     uprintf("- 1: D+/D- 1 (Not connected on basically all cables)\r\n");
     uprintf("- 2: D+/D- 2 (Connected through cables)\r\n");
@@ -592,70 +667,168 @@ void print_available_mappings() {
 
 bool probe_initialized = false;
 
-void handle_menu() {
-    if(tud_cdc_n_available(ITF_CONSOLE)) {
+void handle_menu()
+{
+    if (tud_cdc_n_available(ITF_CONSOLE))
+    {
         int c = tud_cdc_n_read_char(ITF_CONSOLE);
         tud_cdc_n_write_char(ITF_CONSOLE, c);
-        switch(menu.state) {
-            // Main menu
-            case MENU_STATE_MAIN:
-                for(int i = 0; i < sizeof(commands)/sizeof(tamarin_command); i++) {
-                    tamarin_command *cmd = &commands[i];
-                    if(cmd->key == c) {
-                        uprintf("\r\n");
-                        cmd->implementation(&config);
-                        return;
-                    }
+        switch (menu.state)
+        {
+        // Main menu
+        case MENU_STATE_MAIN:
+            for (int i = 0; i < sizeof(commands) / sizeof(tamarin_command); i++)
+            {
+                tamarin_command *cmd = &commands[i];
+                if (cmd->key == c)
+                {
+                    uprintf("\r\n");
+                    cmd->implementation(&config);
+                    return;
                 }
-                print_menu();
-                break;
-            // Menu to select which bus to update the mapping of
-            case MENU_STATE_MAPPING_SELECT_BUS:
-                if(('1' <= c) && (c <= '4')) {
-                    menu.mapping_selected_bus = c - '1';
-                    menu.state = MENU_STATE_MAPPING_SELECT_MAPPING;
-                    print_available_mappings();
-                } else {
-                    cmd_set_pin_mapping(&config);
+            }
+            print_menu();
+            break;
+        // Menu to select which bus to update the mapping of
+        case MENU_STATE_MAPPING_SELECT_BUS:
+            if (('1' <= c) && (c <= '4'))
+            {
+                menu.mapping_selected_bus = c - '1';
+                menu.state = MENU_STATE_MAPPING_SELECT_MAPPING;
+                print_available_mappings();
+            }
+            else
+            {
+                cmd_set_pin_mapping(&config);
+            }
+            break;
+        // Menu to select which pins to update the mapping to
+        case MENU_STATE_MAPPING_SELECT_MAPPING:
+            if (('1' <= c) && (c <= '3'))
+            {
+                int mapping = (c - '1') + PIN_MAPPING_DPDN1;
+                // Special case: Mappings go 1, 2, 4
+                if (mapping == 3)
+                {
+                    mapping = 4;
                 }
-                break;
-            // Menu to select which pins to update the mapping to
-            case MENU_STATE_MAPPING_SELECT_MAPPING:
-                if(('1' <= c) && (c <= '3')) {
-                    int mapping = (c - '1') + PIN_MAPPING_DPDN1;
-                    // Special case: Mappings go 1, 2, 4
-                    if(mapping == 3) {
-                        mapping = 4;
-                    }
-                    switch(menu.mapping_selected_bus) {
-                        case 0:
-                            config.uart_pins = mapping;
-                            uprintf("\r\nUART mapping updated to: %s\r\n> ", MAPPING_TO_STRING[config.uart_pins]);
-                            break;
-                        case 1:
-                            config.bus1_pins = mapping;
-                            uprintf("\r\nBus 1 mapping updated to: %s\r\n> ", MAPPING_TO_STRING[config.uart_pins]);
-                            break;
-                        case 2:
-                            config.bus2_pins = mapping;
-                            uprintf("\r\nBus 2 mapping updated to: %s\r\n> ", MAPPING_TO_STRING[config.uart_pins]);
-                            break;
-                        case 3:
-                            config.swd_pins = mapping;
-                            uprintf("\r\nSWD mapping updated to: %s\r\n> ", MAPPING_TO_STRING[config.uart_pins]);
-                            break;
-                        default:
-                            uprintf("ERROR: Unsupported selected bus: %d\r\n> ", menu.mapping_selected_bus);
-                    }
-                    menu.state = MENU_STATE_MAIN;
-                } else {
-                    print_available_mappings();
+                switch (menu.mapping_selected_bus)
+                {
+                case 0:
+                    config.uart_pins = mapping;
+                    uprintf("\r\nUART mapping updated to: %s\r\n> ", MAPPING_TO_STRING[config.uart_pins]);
+                    break;
+                case 1:
+                    config.bus1_pins = mapping;
+                    uprintf("\r\nBus 1 mapping updated to: %s\r\n> ", MAPPING_TO_STRING[config.uart_pins]);
+                    break;
+                case 2:
+                    config.bus2_pins = mapping;
+                    uprintf("\r\nBus 2 mapping updated to: %s\r\n> ", MAPPING_TO_STRING[config.uart_pins]);
+                    break;
+                case 3:
+                    config.swd_pins = mapping;
+                    uprintf("\r\nSWD mapping updated to: %s\r\n> ", MAPPING_TO_STRING[config.uart_pins]);
+                    break;
+                default:
+                    uprintf("ERROR: Unsupported selected bus: %d\r\n> ", menu.mapping_selected_bus);
                 }
-                break;
-            default:
-                printf("ERROR: Unhandled menu state: %d\r\n", menu.state);
+                menu.state = MENU_STATE_MAIN;
+            }
+            else
+            {
+                print_available_mappings();
+            }
+            break;
+        default:
+            printf("ERROR: Unhandled menu state: %d\r\n", menu.state);
         }
     }
+}
+
+bool check_device_disconnected(tamarin_usb_pd *usb_pd)
+{
+    static uint32_t last_check_time = 0;
+    static uint32_t disconnect_start_time = 0;
+    const uint32_t CHECK_INTERVAL_MS = 1000;      // Check every second
+    const uint32_t DISCONNECT_TIMEOUT_MS = 10000; // 10 seconds with no activity
+    const uint32_t RESET_COOLDOWN_MS = 5000;      // 5 seconds between resets
+
+    uint32_t current_time = to_ms_since_boot(get_absolute_time());
+
+    // Only check periodically
+    if (current_time - last_check_time < CHECK_INTERVAL_MS)
+    {
+        return false;
+    }
+
+    last_check_time = current_time;
+
+    // If we're not in the IDLE state yet, we're still initializing
+    if (usb_pd->state != USB_STATE_IDLE)
+    {
+        disconnect_start_time = 0;
+        return false;
+    }
+
+    // Check if we've had any PD activity recently
+    bool no_recent_activity = (current_time - usb_pd->last_connection_time > DISCONNECT_TIMEOUT_MS);
+
+    // Check if enough time has passed since last reset
+    bool reset_cooldown_expired = (current_time - usb_pd->last_reset_time > RESET_COOLDOWN_MS);
+
+    // IMPORTANT: Additionally check physical CC pins to confirm disconnection
+    int16_t cc1 = fusb302_measure_cc_pin_source(0, 0);
+    int16_t cc2 = fusb302_measure_cc_pin_source(0, 1);
+    bool physically_connected = (cc1 > 0 || cc2 > 0);
+
+    // If we're physically connected, update the connection time
+    // This prevents false disconnection detection when a device doesn't send regular PD messages
+    if (physically_connected)
+    {
+        // Only output debug if we were previously in a possible disconnect state
+        if (disconnect_start_time != 0)
+        {
+            uprintf("Physical connection still present (CC1=%d, CC2=%d), canceling disconnect timer\r\n",
+                    cc1, cc2);
+            disconnect_start_time = 0;
+        }
+
+        // Consider this as activity
+        usb_pd->last_connection_time = current_time;
+        return false;
+    }
+
+    // Only consider a disconnection if both no PD activity AND no physical connection
+    if (usb_pd->is_connected && no_recent_activity && !physically_connected)
+    {
+        // Start tracking disconnect time
+        if (disconnect_start_time == 0)
+        {
+            disconnect_start_time = current_time;
+            uprintf("Physical disconnection detected (CC1=%d, CC2=%d) - starting timer\r\n",
+                    cc1, cc2);
+        }
+        // If we've been disconnected long enough and cooldown expired
+        else if ((current_time - disconnect_start_time > CHECK_INTERVAL_MS * 2) &&
+                 reset_cooldown_expired)
+        {
+            uprintf("🔌 Device disconnected! Restarting Tamarin-C...\r\n");
+            usb_pd->last_reset_time = current_time;
+            usb_pd->is_connected = false;
+            return true;
+        }
+    }
+    else
+    {
+        // Reset disconnect timer
+        if (disconnect_start_time != 0)
+        {
+            disconnect_start_time = 0;
+        }
+    }
+
+    return false;
 }
 
 int main()
@@ -666,9 +839,8 @@ int main()
     // Set-up VBUS control
     gpio_init(PIN_VBUS_EN);
     gpio_set_dir(PIN_VBUS_EN, true);
-    gpio_put(PIN_VBUS_EN, 0);  // VBUS disabled
-    sleep_ms(100);  // Delay after initialation
-
+    gpio_put(PIN_VBUS_EN, 0); // VBUS disabled
+    sleep_ms(100);            // Delay after initialation
 
     // Set-up level-shifter power
     // (When the supply is off they should be in low-z)
@@ -680,22 +852,22 @@ int main()
     gpio_init(25);
     gpio_set_dir(25, GPIO_OUT);
 
-
     gpio_put(25, 1);
     sleep_ms(50);
 
     // Don't do anything until we ahve a console connection
-    while(!tud_cdc_n_connected(ITF_CONSOLE)) {
+    while (!tud_cdc_n_connected(ITF_CONSOLE))
+    {
         tud_task();
     }
-
-
 
     print_menu();
 
     // Initialize USB PD controller
-    if(usb_pd_init(&usb_pd, PIN_I2C_SCL, PIN_I2C_SDA, PIN_FUSB_INT)) {
-        while(1) {
+    if (usb_pd_init(&usb_pd, PIN_I2C_SCL, PIN_I2C_SDA, PIN_FUSB_INT))
+    {
+        while (1)
+        {
             gpio_put(25, 1);
             sleep_ms(50);
             gpio_put(25, 0);
@@ -705,24 +877,62 @@ int main()
 
     // Callback when PD is successfully initialized
     usb_pd.initialized_callback = usb_initialized_callback;
+    // Add these variables before the while loop
+    static uint32_t last_cc_check_time = 0;
+    static uint32_t cc_disconnect_time = 0;
+    static uint32_t last_reset_time = 0;
+    const uint32_t CC_CHECK_INTERVAL_MS = 250;      // Increased check interval to 250ms
+    const uint32_t CC_DISCONNECT_TIMEOUT_MS = 1000; // Increased to 1 second
+    const uint32_t MIN_RESET_INTERVAL_MS = 5000;    // Minimum 5 seconds between resets
 
     while (1)
     {
         tud_task();
-        
-        // This will do nothing if no interrupt is pending.
-        // The actual pending flag is set in a GPIO interrupt
-        // handler in usb_pd.
+
+        // Check for device disconnection
+        if (check_device_disconnected(&usb_pd))
+        {
+            // Turn off VBUS
+            vbus_off(&usb_pd);
+            // Reset FUSB302
+            fusb302_pd_reset(0);
+            // Small delay
+            sleep_ms(100);
+            // Restart device
+            tamarin_reset();
+            // No return needed here as tamarin_reset() doesn't return
+        }
+
+        // Existing code
         usb_pd_handle_interrupt(&usb_pd);
         handle_menu();
-        if(config.probe_initialized) {
+        if (config.probe_initialized)
+        {
             tamarin_probe_task();
         }
-        if(config.uart_initialized) {
-            if(uart_rx_program_readable(config.pio, config.sm)) {
+        // In the main while(1) loop, after the existing UART RX handling code:
+        if (config.uart_initialized)
+        {
+            // Existing code for RX from device to USB:
+            if (uart_rx_program_readable(config.pio, config.sm))
+            {
                 char c = uart_rx_program_getc(config.pio, config.sm);
                 tud_cdc_n_write_char(ITF_DCSD, c);
                 tud_cdc_n_write_flush(ITF_DCSD);
+            }
+
+            // NEW CODE: Handle data from USB to device
+            if (tud_cdc_n_available(ITF_DCSD))
+            {
+                uint8_t buf[64];
+                uint32_t count = tud_cdc_n_read(ITF_DCSD, buf, sizeof(buf));
+
+                // Send each byte to the UART TX
+                for (uint32_t i = 0; i < count; i++)
+                {
+                    // Use bit-banging to send the data
+                    uart_tx_bit_bang(PIN_SBU2, buf[i], 115200);
+                }
             }
         }
     }

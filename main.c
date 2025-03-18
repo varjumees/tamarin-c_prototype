@@ -181,7 +181,7 @@ void vdm_send_msg_blocking(
     // vdm_apple_perform_action(exit, persist, exit_conflicting, mapping, action_id, arguments, arguments_len);
     if(usb_pd->log_messages) {
         uprintf("Waiting for response...\r\n");
-        tamarin_display_status("Hold on...", NULL, "Waiting for", "response...");
+        tamarin_display_status("Hold on...", NULL, "Waiting for", "device...");
 
     }
     
@@ -285,7 +285,8 @@ void vdm_send_reboot(tamarin_configuration *config)
     uint32_t arg = 0x8000UL << 16;
     vdm_apple_perform_action(config->usb_pd, 0, 0, 0, PIN_MAPPING_NONE, 0x105, &arg, 1);
     uprintf(">VDM Reboot\r\n");
-    tamarin_display_status("RESTART DEVICE", NULL, "Rebooting device now...", NULL);
+    tamarin_display_status("REBOOT", NULL, "Rebooting", "target device.");
+
 }
 
 void vdm_dfu_hold(tamarin_configuration *config)
@@ -295,6 +296,8 @@ void vdm_dfu_hold(tamarin_configuration *config)
     vdm_send_msg(config->usb_pd, vdm, ARRAY_SIZE(vdm));
     uprintf(">VDM DFU (0x0106)\r\n");
     tamarin_display_status("DFU Mode", NULL, "Command sent", NULL);
+    tamarin_display_status("DFU MODE", NULL, "Device should be", "in DFU mode now.");
+
 }
 
 void vdm_dfu_usb(tamarin_configuration *config)
@@ -377,7 +380,7 @@ void vdm_send_0x0607(tamarin_configuration *config)
 void usb_initialized_callback(tamarin_usb_pd *usb_pd)
 {
     uprintf("✅Communication initialized\r\n");
-    tamarin_display_status("SUCCESS", NULL, "Communication", "initialized!");
+    tamarin_display_status("READY", NULL, "<-DFU        Reboot->", NULL);
     if(config.uart_on_initialize) {
         cmd_uart_mode(&config);
     }
@@ -711,7 +714,7 @@ int main()
     init_buttons();
 
     tamarin_display_init();
-    tamarin_display_status("Tamarin-C", "Initializing...", NULL, NULL);
+    tamarin_display_status("Hold on", "Initializing...", NULL, NULL);
 
     // Set-up VBUS control
     gpio_init(PIN_VBUS_EN);
@@ -739,7 +742,7 @@ int main()
         tud_task();
     }
 
-    tamarin_display_status("Tamarin-C", NULL, "Waiting for", "connection");
+    tamarin_display_status("READY", NULL, "Waiting for", "connection...");
     print_menu();
 
     // Initialize USB PD controller

@@ -14,6 +14,7 @@
 #include "pico/time.h" 
 #include <stdio.h>
 #include <stdarg.h>
+#include "tamarin_display.h"
 
 int16_t POWER = TYPEC_RP_USB;  // 500mA 3A asemel
 
@@ -326,6 +327,7 @@ static void usb_pd_reinitialize(tamarin_usb_pd *usb_pd)
     last_reinit_time = current_time;
 
     uprintf("reinitialize\r\n");
+    tamarin_display_status("Ready for action!", NULL, "Waiting for", "device connection...");
     vbus_off(usb_pd);
     fusb302_pd_reset(0);
     fusb302_tcpm_set_msg_header(0, 1, 1); // Source

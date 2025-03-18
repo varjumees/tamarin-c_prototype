@@ -26,11 +26,13 @@
 #include "usb_pd.h"
 #include "tamarin_probe.h"
 #include "uart_rx.pio.h"
-
+#include "tamarin_display.h"
 #include <stdlib.h>
 
 
 #define LED_PIN 25
+#define BUTTON_LEFT 14
+#define BUTTON_RIGHT 15
 
 enum CC_POLARITY polarity = CC_POLARITY_CC1;
 
@@ -179,6 +181,8 @@ void vdm_send_msg_blocking(
     // vdm_apple_perform_action(exit, persist, exit_conflicting, mapping, action_id, arguments, arguments_len);
     if(usb_pd->log_messages) {
         uprintf("Waiting for response...\r\n");
+        tamarin_display_status("Hold on...", NULL, "Waiting for", "response...");
+
     }
     
     uint32_t end_time = to_ms_since_boot(get_absolute_time()) + timeout;
@@ -281,6 +285,7 @@ void vdm_send_reboot(tamarin_configuration *config)
     uint32_t arg = 0x8000UL << 16;
     vdm_apple_perform_action(config->usb_pd, 0, 0, 0, PIN_MAPPING_NONE, 0x105, &arg, 1);
     uprintf(">VDM Reboot\r\n");
+    tamarin_display_status("RESTART DEVICE", NULL, "Rebooting device now...", NULL);
 }
 
 void vdm_dfu_hold(tamarin_configuration *config)
@@ -289,6 +294,7 @@ void vdm_dfu_hold(tamarin_configuration *config)
     uint32_t vdm[] = { 0x5ac8012, 0x0106, 0x80010000};
     vdm_send_msg(config->usb_pd, vdm, ARRAY_SIZE(vdm));
     uprintf(">VDM DFU (0x0106)\r\n");
+    tamarin_display_status("DFU Mode", NULL, "Command sent", NULL);
 }
 
 void vdm_dfu_usb(tamarin_configuration *config)
@@ -296,6 +302,7 @@ void vdm_dfu_usb(tamarin_configuration *config)
     uint32_t arg = 0x8001UL << 16;
     vdm_apple_perform_action(config->usb_pd, 0,0, 0, PIN_MAPPING_DPDN2, 0x606, &arg, 1);
     uprintf(">VDM DFU USB (0x606)\r\n");
+
 }
 
 void vdm_debug_usb(tamarin_configuration *config)
@@ -370,6 +377,7 @@ void vdm_send_0x0607(tamarin_configuration *config)
 void usb_initialized_callback(tamarin_usb_pd *usb_pd)
 {
     uprintf("✅Communication initialized\r\n");
+    tamarin_display_status("SUCCESS", NULL, "Communication", "initialized!");
     if(config.uart_on_initialize) {
         cmd_uart_mode(&config);
     }
@@ -658,10 +666,52 @@ void handle_menu() {
     }
 }
 
+// Add this function before main()
+void init_buttons() {
+    // Initialize buttons with pull-ups
+    gpio_init(BUTTON_LEFT);
+    gpio_init(BUTTON_RIGHT);
+    gpio_set_dir(BUTTON_LEFT, GPIO_IN);
+    gpio_set_dir(BUTTON_RIGHT, GPIO_IN);
+    gpio_pull_up(BUTTON_LEFT);
+    gpio_pull_up(BUTTON_RIGHT);
+}
+
+// Add these variables before main()
+static bool left_button_prev = true;
+static bool right_button_prev = true;
+
+// Add this function before main()
+void check_buttons(tamarin_configuration *config) {
+    // Read buttons (they are active low due to pull-up)
+    bool left_button = gpio_get(BUTTON_LEFT);
+    bool right_button = gpio_get(BUTTON_RIGHT);
+    
+    // Check for falling edge on left button (DFU command)
+    if (left_button == false && left_button_prev == true) {
+        uprintf("\r\nButton Left: DFU Command\r\n");
+        cmd_dfu(config);
+    }
+    
+    // Check for falling edge on right button (Reboot command)
+    if (right_button == false && right_button_prev == true) {
+        uprintf("\r\nButton Right: Reboot Command\r\n");
+        cmd_reboot_device(config);
+    }
+    
+    // Update previous states
+    left_button_prev = left_button;
+    right_button_prev = right_button;
+}
+
 int main()
 {
     board_init();
     tusb_init();
+    init_buttons();
+
+    tamarin_display_init();
+    tamarin_display_status("Tamarin-C", "Initializing...", NULL, NULL);
 
     // Set-up VBUS control
     gpio_init(PIN_VBUS_EN);
@@ -689,8 +739,7 @@ int main()
         tud_task();
     }
 
-
-
+    tamarin_display_status("Tamarin-C", NULL, "Waiting for", "connection");
     print_menu();
 
     // Initialize USB PD controller
@@ -710,6 +759,7 @@ int main()
     {
         tud_task();
         
+        check_buttons(&config);
         // This will do nothing if no interrupt is pending.
         // The actual pending flag is set in a GPIO interrupt
         // handler in usb_pd.

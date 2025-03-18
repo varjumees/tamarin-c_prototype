@@ -11,8 +11,7 @@
 #include "usb_pd.h"
 #include "tamarin_hw.h"
 #include "hardware/gpio.h"
-#include "pico/time.h"
-
+#include "pico/time.h" 
 #include <stdio.h>
 #include <stdarg.h>
 
@@ -313,8 +312,19 @@ static void handle_msg(tamarin_usb_pd *usb_pd, enum fusb302_rxfifo_tokens sop, i
         }
     }
 }
+
+static uint32_t last_reinit_time = 0;
+const uint32_t REINIT_COOLDOWN_MS = 1000;
+
 static void usb_pd_reinitialize(tamarin_usb_pd *usb_pd)
 {
+    uint32_t current_time = to_ms_since_boot(get_absolute_time());
+    if (current_time - last_reinit_time < REINIT_COOLDOWN_MS) {
+        // Skip reinitialization if we're within cooldown period
+        return;
+    }
+    last_reinit_time = current_time;
+
     uprintf("reinitialize\r\n");
     vbus_off(usb_pd);
     fusb302_pd_reset(0);
@@ -324,9 +334,8 @@ static void usb_pd_reinitialize(tamarin_usb_pd *usb_pd)
     sleep_ms(500);
     fusb302_tcpm_set_vconn(0, 1);
     fusb302_tcpm_set_rx_enable(0, 0);
-    // Set CC resistor pull value to USB (can also be 1.5A, 3A, etc)
     fusb302_tcpm_select_rp_value(0, POWER);
-    fusb302_tcpm_set_cc(0, TYPEC_CC_RP); // DFP mode
+    fusb302_tcpm_set_cc(0, TYPEC_CC_RP);
     fusb302_setup_mdac();
     fusb302_setup_toggle();
     fusb302_enable_toggle();
@@ -362,63 +371,60 @@ void usb_pd_handle_interrupt(tamarin_usb_pd *usb_pd)
     }
 
     // Detect unplugging by checking VBUS or CC levels
-    static bool last_connected = true;           // Tracks the last connection state
-    static uint32_t last_stable_time = 0;        // Tracks the last time the state was stable
-    const uint32_t debounce_time_ms = 100;       // Debounce time in milliseconds
+    static bool last_connected = true;           
+    static uint32_t last_stable_time = 0;        
+    static uint8_t stable_cc_count = 0;          
+    const uint32_t debounce_time_ms = 250;       
+    const uint8_t CC_STABLE_COUNT = 3;           
 
-    int16_t cc1 = fusb302_measure_cc_pin_source(0, 0); // Measure CC1
-    int16_t cc2 = fusb302_measure_cc_pin_source(0, 1); // Measure CC2
-    int16_t vbus_level = fusb302_tcpm_get_vbus_level(0); // Measure VBUS
+    int16_t cc1 = fusb302_measure_cc_pin_source(0, 0); 
+    int16_t cc2 = fusb302_measure_cc_pin_source(0, 1); 
+    int16_t vbus_level = fusb302_tcpm_get_vbus_level(0); 
 
     // Debugging output for CC and VBUS levels
     uprintf("CC1: %d, CC2: %d, VBUS: %d\r\n", cc1, cc2, vbus_level);
+
+    // Add check for CC1=1, CC2=1, VBUS=1 condition
+    if (cc1 == 1 && cc2 == 1 && vbus_level == 1) {
+        uprintf("Detected CC1=1, CC2=1, VBUS=1 condition - reinitializing...\r\n");
+        usb_pd_reinitialize(usb_pd);
+        usb_pd_enable_interrupt(usb_pd);
+        return;
+    }
 
     // Determine current connection state
     bool currently_connected = !(cc1 == TYPEC_CC_VOLT_OPEN && cc2 == TYPEC_CC_VOLT_OPEN) && vbus_level;
 
     uint32_t current_time = to_ms_since_boot(get_absolute_time());
 
-    // Handle unplugging
-    if (!currently_connected && last_connected)
-    {
-        // Wait for debounce time to confirm unplugging
-        if (current_time - last_stable_time > debounce_time_ms)
-        {
-            last_stable_time = current_time;
-
-            if (!vbus_level)
-            {
-                // Cable is fully unplugged (VBUS is 0)
-                uprintf("🔌 Unplugging detected! Restarting Tamarin-C...\r\n");
-                tamarin_reset(); // Restart the device
-                return;
-            }
-            else
-            {
-                // Ignore transient states with VBUS still high
-                uprintf("🔌 Unplugging ignored: VBUS still high.\r\n");
+    // Connection state change detection with hysteresis
+    if (currently_connected != last_connected) {
+        if (++stable_cc_count >= CC_STABLE_COUNT) {
+            if (current_time - last_stable_time > debounce_time_ms) {
+                last_stable_time = current_time;
+                
+                if (!currently_connected) {
+                    if (!vbus_level) {
+                        // Cable is fully unplugged (VBUS is 0)
+                        uprintf("🔌 Unplugging detected! Restarting Tamarin-C...\r\n");
+                        tamarin_reset();
+                        return;
+                    } else {
+                        // Ignore transient states with VBUS still high
+                        uprintf("🔌 Unplugging ignored: VBUS still high.\r\n");
+                    }
+                } else {
+                    uprintf("🔌 Plugging detected! Device is now connected.\r\n");
+                }
+                
+                last_connected = currently_connected;
+                stable_cc_count = 0;
             }
         }
-    }
-    // Handle plug-in
-    else if (currently_connected && !last_connected)
-    {
-        // Wait for debounce time to confirm plug-in
-        if (current_time - last_stable_time > debounce_time_ms)
-        {
-            last_stable_time = current_time;
-
-            uprintf("🔌 Plugging detected! Device is now connected.\r\n");
-        }
-    }
-
-    // Reset the debounce timer if the state hasn't changed
-    if (currently_connected == last_connected)
-    {
+    } else {
+        stable_cc_count = 0;
         last_stable_time = current_time;
     }
-
-    last_connected = currently_connected;
 
     // Existing interrupt handling logic
     switch (usb_pd->state)

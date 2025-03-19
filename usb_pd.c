@@ -408,15 +408,14 @@ void usb_pd_handle_interrupt(tamarin_usb_pd *usb_pd)
                 if (!currently_connected) {
                     if (!vbus_level) {
                         // Cable is fully unplugged (VBUS is 0)
-                        uprintf("🔌 Unplugging detected! Restarting Tamarin-C...\r\n");
+                        tamarin_display_status("DISCONNECTED", "Cable", "removed", NULL);
                         tamarin_reset();
                         return;
                     } else {
-                        // Ignore transient states with VBUS still high
-                        uprintf("🔌 Unplugging ignored: VBUS still high.\r\n");
+                        tamarin_display_status("WARNING", "VBUS still", "high", NULL);
                     }
                 } else {
-                    uprintf("🔌 Plugging detected! Device is now connected.\r\n");
+                    tamarin_display_status("CONNECTED", "Device", "detected", NULL);
                 }
                 
                 last_connected = currently_connected;
@@ -536,44 +535,35 @@ bool usb_pd_init(tamarin_usb_pd *usb_pd, uint32_t pin_scl, uint32_t pin_sda, uin
     // Try to read the device ID to check if we can talk to the FUSB302
     int16_t reg;
     tcpc_read(0, TCPC_REG_DEVICE_ID, &reg);
-    uprintf("Device ID: %d\r\n", reg);
-    if (!(reg & 0x80))
-    {
-        uprintf("Invalid device ID %04x. Is the FUSB302 alive?\r\n", reg);
+    
+    if (!(reg & 0x80)) {
+        tamarin_display_status("ERROR", "FUSB302", "not found", NULL);
         usb_pd->state = USB_STATE_FUSB_NOT_FOUND;
         return 1;
     }
 
-    uprintf("Device ID: %c_rev%c (0x%x)\r\n",
-           'A' + ((reg >> 4) & 0x7), 'A' + (reg & 3), reg);
+    tamarin_display_status("Init", "FUSB302", "Found", NULL);
 
+    // Rest of initialization...
     fusb302_tcpm_init(0);
     fusb302_pd_reset(0);
-    // Power & data source
     fusb302_tcpm_set_msg_header(0, 1, 1);
-    // Configure CC pulls
     fusb302_tcpm_set_cc(0, TYPEC_CC_RP);
     fusb302_auto_goodcrc_enable(0, 1);
     vbus_off(usb_pd);
     sleep_ms(500);
-    // fusb302_tcpm_set_vconn(0, 1);
     fusb302_tcpm_set_rx_enable(0, 0);
-    // Set CC resistor pull value to USB (can also be 1.5A, 3A, etc)
     fusb302_tcpm_select_rp_value(0, POWER);
-    // DFP = Downstream facing port
-    fusb302_tcpm_set_cc(0, TYPEC_CC_RP); // DFP mode
+    fusb302_tcpm_set_cc(0, TYPEC_CC_RP);
 
-    // Configure the DAC so we can detect plug events
     fusb302_setup_mdac();
-    // Setup the toggle auto-detect functionality
     fusb302_setup_toggle();
-    // Enable plug auto-detect
     fusb302_enable_toggle();
-    // Enable the power-supply
     vbus_on(usb_pd);
 
     usb_pd->state = USB_STATE_WAITING_FOR_COMP_CHNG;
-    // Enable interrupt
     usb_pd_enable_interrupt(usb_pd);
+    
+    tamarin_display_status("Ready", "Waiting for", "device...", NULL);
     return 0;
 }

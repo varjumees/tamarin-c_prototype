@@ -51,8 +51,11 @@ void vuprintf(const char* format, va_list args) {
 }
 
 void uprintf(const char* format, ...) {
-    va_list args;
-    va_start(args, format);
-    vuprintf(format, args);
-    va_end(args);
+    // Only output if console is connected
+    if (tud_cdc_n_connected(ITF_CONSOLE)) {
+        va_list args;
+        va_start(args, format);
+        vuprintf(format, args);
+        va_end(args);
+    }
 }

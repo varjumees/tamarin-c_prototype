@@ -379,17 +379,14 @@ void vdm_send_0x0607(tamarin_configuration *config)
 // This is called once a PD negotiation has taken place
 void usb_initialized_callback(tamarin_usb_pd *usb_pd)
 {
-    uprintf("✅Communication initialized\r\n");
     tamarin_display_status("READY", NULL, "<-DFU        Reboot->", NULL);
+    
     if(config.uart_on_initialize) {
         cmd_uart_mode(&config);
     }
-    else if(config.probe_on_initialize)
-    {
+    else if(config.probe_on_initialize) {
         cmd_jtag_mode(&config);
     }
-
-    uprintf("\r\n> ");
 }
 
 void vdm_get_action_list(tamarin_usb_pd *usb_pd)
@@ -437,15 +434,16 @@ typedef struct menu {
 struct menu menu = {
     .state = MENU_STATE_MAIN
 };
-
 void cmd_jtag_mode(tamarin_configuration *config) {
     if(config->uart_initialized) {
-        uprintf("UART already initialized. Currently only one operation type is supported.\r\n");
+        tamarin_display_status("ERROR", "UART already", "initialized", NULL);
         return;
     }
-    uprintf("Configuring JTAG pins... \r\n");
-
+    
+    tamarin_display_status("JTAG", "Configuring", "pins...", NULL);
     vdm_send_swd(config);
+    
+    // Configure GPIO...
     gpio_init(PIN_SHIFTER_SUPPLY);
     gpio_set_dir(PIN_SHIFTER_SUPPLY, 1);
     gpio_put(PIN_SHIFTER_SUPPLY, 1);
@@ -456,13 +454,14 @@ void cmd_jtag_mode(tamarin_configuration *config) {
     gpio_set_dir(PIN_SBU1_DIR, 1);
     gpio_put(PIN_SBU1_DIR, SHIFTER_DIRECTION_OUT);
 
+    
     if(config->probe_initialized) {
         tamarin_probe_deinit();
     }
     tamarin_probe_init();
     config->probe_initialized = true;
     
-    uprintf("🐞 SWD mode enabled. Use openocd -f interface/tamarin.cfg to connect.\r\n");
+    tamarin_display_status("JTAG", "Ready for", "OpenOCD", NULL);
 }
 
 void cmd_jtag_mode_no_probe(tamarin_configuration *config) {
@@ -531,6 +530,34 @@ void cmd_map_410(tamarin_configuration *config) {
 void cmd_dfu(tamarin_configuration *config) {
     vdm_dfu_hold(config);
 }
+// Add these new command functions
+void cmd_vdm_dfu_usb(tamarin_configuration *config) {
+    vdm_dfu_usb(config);
+}
+
+void cmd_vdm_debug_usb(tamarin_configuration *config) {
+    vdm_debug_usb(config);
+}
+
+void cmd_vdm_send_weird_uart(tamarin_configuration *config) {
+    vdm_send_weird_uart(config);
+}
+
+void cmd_vdm_send_weird_uart2(tamarin_configuration *config) {
+    vdm_send_weird_uart2(config);
+}
+
+void cmd_vdm_send_0x0410(tamarin_configuration *config) {
+    vdm_send_0x0410(config);
+}
+
+void cmd_vdm_send_0x0607(tamarin_configuration *config) {
+    vdm_send_0x0607(config);
+}
+
+void cmd_vdm_pd_reset(tamarin_configuration *config) {
+    vdm_pd_reset(config);
+}
 
 void cmd_fetch_actions(tamarin_configuration *config) {
     vdm_get_action_list(config->usb_pd);
@@ -566,6 +593,7 @@ typedef struct tamarin_command {
     void (*implementation)(tamarin_configuration *config);
 } tamarin_command;
 
+// Add new entries to the commands array
 tamarin_command commands[] = {
     {.key = '1', .description = "JTAG Mode (with Tamarin Probe support)", .implementation = cmd_jtag_mode},
     {.key = '!', .description = "JTAG Mode (For external debugger)", .implementation = cmd_jtag_mode_no_probe},
@@ -574,10 +602,15 @@ tamarin_command commands[] = {
     {.key = '3', .description = "Reboot device", .implementation = cmd_reboot_device},
     {.key = 'A', .description = "Map internal bus 1 (ACE SPMI on iPhone 15, I2C on macs)", .implementation = cmd_map_bus1},
     {.key = 'B', .description = "Map internal bus 2 (Unknown on iPhone 15, I2C ACE communication on macs)", .implementation = cmd_map_bus2},
-    // {.key = 'W', .description = "Map weird UART (iPhone 15) on SBU", .implementation = cmd_map_weird_uart},
+    {.key = 'W', .description = "Map weird UART (iPhone 15) on SBU", .implementation = cmd_map_weird_uart},
+    {.key = 'X', .description = "Map weird UART2 (iPhone 15) on SBU", .implementation = cmd_map_weird_uart2},
     {.key = 'D', .description = "Enter DFU (Debug USB)", .implementation = cmd_dfu},
+    {.key = 'P', .description = "PD Reset", .implementation = cmd_vdm_pd_reset},
+    {.key = 'E', .description = "DFU USB", .implementation = cmd_vdm_dfu_usb},
+    {.key = 'G', .description = "Debug USB", .implementation = cmd_vdm_debug_usb},
+    {.key = '4', .description = "Send 0x410 mode (on DP/DN1)", .implementation = cmd_vdm_send_0x0410},
+    {.key = '5', .description = "Send 0x607 mode (on SBU)", .implementation = cmd_vdm_send_0x0607},
     {.key = 'F', .description = "Fetch supported VDM actions", .implementation = cmd_fetch_actions},
-    // {.key = '4', .description = "Send 0x410 mode (on SBU)", .implementation = cmd_map_410},
     {.key = 'M', .description = "Set pin mapping\r\n", .implementation = cmd_set_pin_mapping},
     {.key = 'R', .description = "Reset Tamarin Cable", .implementation = cmd_reset_tamarin},
     {.key = 'U', .description = "Tamarin firmware update mode", .implementation = cmd_firmware_update},
@@ -709,10 +742,12 @@ void check_buttons(tamarin_configuration *config) {
 
 int main()
 {
+    // Basic hardware initialization
     board_init();
     tusb_init();
     init_buttons();
 
+    // Initialize display first for status messages
     tamarin_display_init();
     tamarin_display_status("Hold on", "Initializing...", NULL, NULL);
 
@@ -720,8 +755,7 @@ int main()
     gpio_init(PIN_VBUS_EN);
     gpio_set_dir(PIN_VBUS_EN, true);
     gpio_put(PIN_VBUS_EN, 0);  // VBUS disabled
-    sleep_ms(100);  // Delay after initialation
-
+    sleep_ms(100);  // Delay after initialization
 
     // Set-up level-shifter power
     // (When the supply is off they should be in low-z)
@@ -732,21 +766,13 @@ int main()
     // LED
     gpio_init(25);
     gpio_set_dir(25, GPIO_OUT);
-
-
     gpio_put(25, 1);
     sleep_ms(50);
 
-    // Don't do anything until we ahve a console connection
-    while(!tud_cdc_n_connected(ITF_CONSOLE)) {
-        tud_task();
-    }
-
-    tamarin_display_status("READY", NULL, "Waiting for", "connection...");
-    print_menu();
-
-    // Initialize USB PD controller
+    // Initialize USB PD controller without waiting for console
     if(usb_pd_init(&usb_pd, PIN_I2C_SCL, PIN_I2C_SDA, PIN_FUSB_INT)) {
+        // If initialization fails, show error on LED and display
+        tamarin_display_status("ERROR", "USB PD Init", "Failed", NULL);
         while(1) {
             gpio_put(25, 1);
             sleep_ms(50);
@@ -755,28 +781,71 @@ int main()
         }
     }
 
-    // Callback when PD is successfully initialized
+    // Set callback for when PD is successfully initialized
     usb_pd.initialized_callback = usb_initialized_callback;
 
+    // If USB is connected, wait for console and show menu
+    if(tud_mounted()) {
+        tamarin_display_status("USB", "Waiting for", "console...", NULL);
+        uint32_t console_timeout = to_ms_since_boot(get_absolute_time()) + 1000;
+        
+        while(!tud_cdc_n_connected(ITF_CONSOLE)) {
+            tud_task();
+            // Don't wait forever for console
+            if(to_ms_since_boot(get_absolute_time()) > console_timeout) {
+                break;
+            }
+        }
+
+        if(tud_cdc_n_connected(ITF_CONSOLE)) {
+            print_menu();
+        }
+    }
+
+    // Main operation loop
     while (1)
     {
+        // USB device task - handle USB events
         tud_task();
         
+        // Handle physical buttons
         check_buttons(&config);
-        // This will do nothing if no interrupt is pending.
-        // The actual pending flag is set in a GPIO interrupt
-        // handler in usb_pd.
+
+        // Handle USB PD interrupts
         usb_pd_handle_interrupt(&usb_pd);
-        handle_menu();
+
+        // Only handle menu if console is available
+        if(tud_cdc_n_connected(ITF_CONSOLE)) {
+            handle_menu();
+        }
+
+        // Handle probe tasks if initialized
         if(config.probe_initialized) {
             tamarin_probe_task();
         }
+
+        // Handle UART if initialized
         if(config.uart_initialized) {
             if(uart_rx_program_readable(config.pio, config.sm)) {
                 char c = uart_rx_program_getc(config.pio, config.sm);
-                tud_cdc_n_write_char(ITF_DCSD, c);
-                tud_cdc_n_write_flush(ITF_DCSD);
+                // Only send to USB if connected
+                if(tud_cdc_n_connected(ITF_DCSD)) {
+                    tud_cdc_n_write_char(ITF_DCSD, c);
+                    tud_cdc_n_write_flush(ITF_DCSD);
+                }
             }
+        }
+
+        // Update display periodically if needed
+        // You could add a simple state display here
+        static uint32_t last_display_update = 0;
+        uint32_t current_time = to_ms_since_boot(get_absolute_time());
+        if(current_time - last_display_update > 1000) {  // Update every second
+            if(!config.probe_initialized && !config.uart_initialized) {
+                // Only update if no specific mode is active
+                tamarin_display_status("READY", NULL, "<-DFU        Reboot->", NULL);
+            }
+            last_display_update = current_time;
         }
     }
 }

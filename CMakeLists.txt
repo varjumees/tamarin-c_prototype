@@ -36,8 +36,8 @@ target_sources(tamarin_c PRIVATE
         usb_pd.c
         tamarin_probe.c
         usb_descriptors.c
-        ssd1306.c
-        tamarin_display.c)
+        display/ssd1306.c
+        display/tamarin_display.c)
 # Required so the build finds tusb_config.h
 target_include_directories(tamarin_c PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 

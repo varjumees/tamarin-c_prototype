@@ -26,7 +26,7 @@
 #include "usb_pd.h"
 #include "tamarin_probe.h"
 #include "uart_rx.pio.h"
-#include "tamarin_display.h"
+#include "display/tamarin_display.h"
 #include <stdlib.h>
 
 

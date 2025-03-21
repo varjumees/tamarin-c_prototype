@@ -14,7 +14,7 @@
 #include "pico/time.h" 
 #include <stdio.h>
 #include <stdarg.h>
-#include "tamarin_display.h"
+#include "display/tamarin_display.h"
 
 int16_t POWER = TYPEC_RP_USB;  // 500mA 3A asemel
 
